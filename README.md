@@ -43,4 +43,3 @@ pnpm build-dev
 
 - [plugin-front](plugin-front/README.md)：助手界面、Agent 运行逻辑和宿主适配。
 - [plugin-node-dev](plugin-node-dev/README.md)：AI 请求代理和后端接口。
-- [docs](docs/)：设计与实现文档。

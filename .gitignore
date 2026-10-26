@@ -8,3 +8,4 @@ build/
 *.log
 *.tsbuildinfo
 .DS_Store
+/docs/superpowers/
