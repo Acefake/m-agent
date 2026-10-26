@@ -1,0 +1,16 @@
+{
+  "id": "agent",
+  "version": "0.2.0",
+  "name": "AI 建模助手",
+  "author": "M-Design",
+  "description": "右侧 AI 助手面板：会话历史、供应商与技能设置、附件、聊天/提案/编辑三种权限模式，读写模型树与画布，变更可回滚",
+  "type": "FRONTEND",
+  "entryPoint": "",
+  "dependencies": [],
+  "resources": [],
+  "metadata": {
+    "multiLanguage": false,
+    "defaultLanguage": "zh",
+    "supportedLanguages": ["zh"]
+  }
+}

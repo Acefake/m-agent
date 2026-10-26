@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>MessageItem 状态预览（临时）</title>
+    <style>
+      body {
+        margin: 0;
+        background: #eef0f4;
+        font:
+          13px/1.6 system-ui,
+          "Microsoft YaHei";
+      }
+      #app {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        padding: 20px;
+        align-items: flex-start;
+      }
+      .pane {
+        width: 400px;
+        flex-shrink: 0;
+        background: #fff;
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        padding: 14px;
+        box-sizing: border-box;
+      }
+      .pane h2 {
+        font-size: 12px;
+        color: #7e8794;
+        margin: 0 0 12px;
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      const Vue = await import("/node_modules/vue/dist/vue.esm-browser.js");
+      window.api = { vue: Vue };
+      const { default: MessageItem } = await import("/src/components/panels/aiAssistant/MessageItem.vue");
+
+      const reasoningOne =
+        "用户要在动力系统下加一个发动机模块。先读取模型树确认层级与现有子系统命名，再决定发动机模块的归属与命名，避免与已有元素重名。";
+      const reasoningTwo =
+        "模型树已读取：动力系统下目前只有电池系统与传动系统，命名风格为「xx系统」。发动机模块按同样风格命名，并补充一个属性行。";
+
+      const userMessage = {
+        id: "u1",
+        role: "user",
+        content: "给动力系统加一个发动机模块，并把它画到结构图上",
+        skillNames: ["审图"],
+        context: {
+          selection: [{ id: "pkg-1", title: "动力系统", type: "Package" }],
+          diagram: { id: "diagram-1", name: "车辆结构图", shapeCount: 12 }
+        },
+        toolCalls: [],
+        createdAt: Date.now()
+      };
+
+      const doneMessage = {
+        id: "a1",
+        role: "assistant",
+        content: [
+          "已经确认改动方向，下面按顺序执行。",
+          "",
+          "### 改动内容",
+          "",
+          "- 在 `pkg-1` 下新增模块 **发动机**",
+          "- 为模块补充属性 `发动机型号`",
+          "- 在结构图上放置图形并 `arrange-shapes` 对齐",
+          "",
+          "| 操作 | 目标 | 说明 |",
+          "| --- | --- | --- |",
+          "| create-element | 动力系统 | 新增 Block 模块 |",
+          "| update-property | 发动机 | 写入型号属性 |",
+          "| create-shape | 车辆结构图 | 放置符号图形 |",
+          "",
+          "```sysml",
+          "part def Engine {",
+          "  attribute 型号 : String;",
+          "}",
+          "```",
+          "",
+          "确认后执行；本轮改动可整体回滚。"
+        ].join("\n"),
+        steps: [
+          { kind: "reasoning", text: reasoningOne },
+          { kind: "tool", id: "t1" },
+          { kind: "reasoning", text: reasoningTwo },
+          { kind: "tool", id: "t2" },
+          { kind: "tool", id: "t3" }
+        ],
+        toolCalls: [
+          {
+            id: "t1",
+            name: "model_get_tree",
+            input: { rootId: "root", maxDepth: 3 },
+            state: "done",
+            output: "动力系统 (Package)\n ├─ 电池系统 (Block)\n └─ 传动系统 (Block)"
+          },
+          {
+            id: "t2",
+            name: "model_search",
+            input: { keyword: "发动机" },
+            state: "done",
+            output: "匹配 2 项：发动机型号（属性）、发动机（模块）"
+          },
+          { id: "t3", name: "text_validate", input: { elementId: "pkg-1" }, state: "error", error: "第 3 行：属性缺少类型声明" }
+        ],
+        thinkingMs: 15200,
+        durationMs: 48200,
+        model: "deepseek-v4-flash",
+        usage: { inputTokens: 39800, outputTokens: 1430, totalTokens: 41230 },
+        proposal: {
+          id: "p1",
+          title: "新增发动机模块并上画布",
+          summary: "在动力系统下新增模块、写入属性，并在结构图上放置与排列图形。",
+          status: "pending",
+          operations: [
+            { id: "op1", type: "create-element", summary: "新增模块「发动机」（Block）", status: "pending" },
+            { id: "op2", type: "update-property", summary: "写入属性 发动机型号 = WF-120", status: "pending" },
+            { id: "op3", type: "create-shape", summary: "在结构图上放置发动机图形", status: "pending" },
+            {
+              id: "op4",
+              type: "replace-sysml-text",
+              summary: "更新 SysML 文本",
+              status: "pending",
+              textualContent: "part def Engine {\n  attribute 型号 : String;\n}"
+            }
+          ]
+        },
+        createdAt: Date.now()
+      };
+
+      const streamingMessage = {
+        id: "a2",
+        role: "assistant",
+        content: "正在读取模型树，先整理动力系统的现有结构，再给出引擎模块的命名建议。",
+        steps: [
+          { kind: "tool", id: "s1" },
+          { kind: "reasoning", text: "先看动力系统下面有哪些子系统。" }
+        ],
+        toolCalls: [{ id: "s1", name: "model_get_tree", input: { rootId: "pkg-1" }, state: "running" }],
+        createdAt: Date.now()
+      };
+
+      const planMessage = {
+        id: "a3",
+        role: "assistant",
+        content: "这个需求包含模型与图形两部分，建议分步执行。",
+        steps: [],
+        toolCalls: [],
+        plan: {
+          id: "plan1",
+          title: "发动机模块落地计划",
+          summary: "先建模型元素与属性，再上画布并连线，最后校验。",
+          status: "pending",
+          steps: [
+            {
+              id: "ps1",
+              type: "create-element",
+              summary: "在动力系统下新增模块「发动机」",
+              status: "completed",
+              result: "已创建 element-201",
+              acceptance: "模型树出现新模块"
+            },
+            { id: "ps2", type: "update-property", summary: "写入属性 发动机型号", status: "pending", acceptance: "属性面板可见型号行" },
+            { id: "ps3", type: "create-shape", summary: "在结构图上放置图形", status: "pending", acceptance: "图形位于动力系统分组内" }
+          ]
+        },
+        createdAt: Date.now()
+      };
+
+      const choiceMessage = {
+        id: "a4",
+        role: "assistant",
+        content: "发动机的建模方式有两种，选一种我继续。",
+        steps: [],
+        toolCalls: [],
+        choicePrompt: {
+          id: "c1",
+          question: "发动机按哪种方式建模？",
+          allowCustomInput: true,
+          status: "pending",
+          options: [
+            { id: "o1", label: "作为 Block 模块", description: "与现有子系统一致，便于后续扩展端口" },
+            { id: "o2", label: "作为值类型属性", description: "只记录型号与参数，不参与结构分解" }
+          ]
+        },
+        createdAt: Date.now()
+      };
+
+      const timelineMessage = {
+        ...doneMessage,
+        id: "timeline",
+        proposal: undefined,
+        content: "已读完项目。模型已创建。正在检查结果。",
+        steps: [
+          { kind: "tool", id: "t1" },
+          { kind: "text", text: "已读完项目。" },
+          { kind: "tool", id: "t2" },
+          { kind: "text", text: "模型已创建。" },
+          { kind: "tool", id: "t3" },
+          { kind: "text", text: "正在检查结果。" }
+        ]
+      };
+
+      const h = Vue.h;
+      const pane = (title, message, streaming) =>
+        h("div", { class: "pane" }, [h("h2", title), h(MessageItem, { message, streaming: Boolean(streaming) })]);
+
+      Vue.createApp({
+        render: () =>
+          h("div", { id: "app" }, [
+            pane("按阶段交错（运行中）", timelineMessage, true),
+            pane("按阶段交错（已完成）", timelineMessage),
+            pane("用户消息（引用 + 技能）", userMessage),
+            pane("助手完成（过程折叠）", doneMessage),
+            pane("助手流式中（过程展开）", streamingMessage, true),
+            pane("分步计划", planMessage),
+            pane("用户选择", choiceMessage),
+            ...["continuing", "step-limit", "cancelled", "error"].map(status =>
+              pane(
+                status,
+                {
+                  ...doneMessage,
+                  proposal: undefined,
+                  runState: {
+                    status,
+                    message:
+                      status === "continuing"
+                        ? "已保留已执行结果，正在自动继续剩余任务"
+                        : status === "cancelled"
+                          ? "已停止；已提交的改动保留，未启动后续操作"
+                          : status === "step-limit"
+                            ? "本轮达到执行预算，任务尚未确认全部完成；已保留工具结果和已提交改动，可继续剩余任务"
+                            : "请求未正常结束，已保留实际工具执行结果",
+                    modelSteps: 8,
+                    continuations: 1
+                  }
+                },
+                status === "continuing"
+              )
+            )
+          ])
+      }).mount("#app");
+    </script>
+  </body>
+</html>

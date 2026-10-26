@@ -1,0 +1,21 @@
+{
+  "name": "m-design-agent-node",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.19.0",
+  "scripts": {
+    "start": "node scripts/watch.cjs",
+    "start-tsc": "tsc --watch -p tsconfig.dev.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-build.cjs",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^8.4.7",
+    "@types/node": "^20.17.50",
+    "class-validator": "^0.13.2",
+    "reflect-metadata": "^0.1.14",
+    "rxjs": "^7.2.0",
+    "typescript": "^5.8.3"
+  }
+}

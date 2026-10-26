@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>AI 助手面板：模拟宿主预览</title>
+    <style>
+      body { margin: 0; font: 13px/1.6 system-ui, "Microsoft YaHei"; background: #f4f6f8; }
+      body > header { padding: 10px 16px; background: #fff7da; border-bottom: 1px solid #eadfa8; }
+      header b { color: #8a6d00; }
+      #shell { display: flex; height: calc(100vh - 44px); }
+      #main { flex: 1; padding: 16px; color: #666; }
+      #dock { display: flex; width: 628px; border-left: 1px solid #d0d0d0; background: #fff; }
+      #panel-host { flex: 1; min-width: 0; }
+      #dock-tabs { width: 48px; background: #f0f2f5; border-left: 1px solid #d0d0d0; display: flex; flex-direction: column; gap: 12px; padding: 32px 6px; align-items: center; }
+      .dock-tab { width: 36px; height: 52px; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; border-radius: 2px; cursor: pointer; font-size: 11px; color: #4b5058; }
+      .dock-tab.active { background: #e3ebff; color: #3475ff; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <b>模拟宿主预览</b>：本页用假的 M-Design 宿主对象与假供应商流式响应渲染右侧 AI 助手面板，
+      只用于本地查看页面与交互（供应商请求不会真正发出，写操作只作用于内存里的假模型树）。
+    </header>
+    <div id="shell">
+      <div id="main">
+        <h3>工作区（模拟）</h3>
+        <p>右侧是插件注册的“AI 助手”页签；点下面的按钮可以在“批注 / AI 助手”之间切换，验证页签激活机制。</p>
+        <p><button id="switch">切换右侧页签（模拟“工具 → AI 建模助手”）</button></p>
+        <pre id="log"></pre>
+      </div>
+      <div id="dock">
+        <div id="panel-host"></div>
+        <div id="dock-tabs">
+          <div class="dock-tab" data-value="comment">批注</div>
+          <div class="dock-tab active" data-value="aiAssistant">AI 助手</div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      const Vue = new URLSearchParams(location.search).has("productionVue")
+        ? await import("/node_modules/vue/dist/vue.esm-browser.prod.js")
+        : await import("/node_modules/vue/dist/vue.esm-browser.js");
+      const log = message => {
+        document.querySelector("#log").textContent += message + "\n";
+      };
+
+      /* ---------------- 假模型树与服务 ---------------- */
+      const nodes = new Map();
+      const addNode = (id, ownerId, name, metaclass, hasChild = false) => {
+        nodes.set(id, { id, loaded: true, data: { id, ownerId, name, metaclass, hasChild, sts: [], type: 0 } });
+        return nodes.get(id);
+      };
+      addNode("root", "", "示例模型", "Model", true);
+      addNode("pkg-1", "root", "车辆系统", "Package", true);
+      let createdSeq = 0;
+
+      const project = {
+        id: "preview-project",
+        readonly: false,
+        config: { id: "preview-project", name: "预览项目" },
+        ui: {
+          isDisplayMode: false,
+          graphTabs: [
+            {
+              id: "diagram-1",
+              modelId: "diagram-1",
+              diagramName: "车辆结构图",
+              visible: true,
+              diagramModel: { id: "diagram-1", name: "车辆结构图", sts: ["BlockDefinitionDiagram"] }
+            }
+          ]
+        },
+        nodePool: {
+          rootNodes: [nodes.get("root")],
+          getNode: id => nodes.get(id),
+          getChildNodes: id => [...nodes.values()].filter(node => node.data.ownerId === id),
+          getSelectedNodes: () => [nodes.get("pkg-1")],
+          loadNodes: async () => undefined
+        },
+        isEditable: () => true
+      };
+
+      const shapes = [
+        { id: "diagram-1", name: "车辆结构图", shapeType: "Diagram", shapeKey: "BlockDefinitionDiagram", bounds: { x: 0, y: 0, width: 900, height: 640 } },
+        { id: "shape-1", name: "整车", shapeType: "Symbol", shapeKey: "Block", modelId: "pkg-1", parentId: null, bounds: { x: 80, y: 80, width: 160, height: 90 } }
+      ];
+      const properties = new Map([["pkg-1", [{ key: "NamedElement-name", name: "名称", value: "车辆系统", dataType: "String", readonly: false }]]]);
+
+      const services = {
+        modelService: {
+          getNodePath: async () => [],
+          getNodesWhenSelectOnTree: async () => [],
+          getChildNodeDatas: async () => [],
+          getModelData: async (projectId, modelId) => nodes.get(modelId)?.data ?? { id: modelId, name: modelId },
+          getModelDatas: async () => [],
+          modelSearch: async keyword => [...nodes.values()].map(node => node.data).filter(data => (data.name || "").includes(keyword)),
+          getCanCreateChildTypes: async () => [
+            { metaclass: "Package", appliedStereotypes: [], cnName: "包" },
+            { metaclass: "Block", appliedStereotypes: ["SysML::Blocks::Block"], cnName: "模块" }
+          ],
+          addModel: async (projectId, ownerId, metaclass, sts, fileInfo, auto, payload, defaultName) => {
+            const id = `created-${++createdSeq}`;
+            addNode(id, ownerId, defaultName || "新元素", metaclass);
+            log(`[假后端] addModel owner=${ownerId} metaclass=${metaclass} name=${defaultName} → ${id}`);
+            return [{ id, name: defaultName, metaclass }];
+          },
+          renameNode: async (projectId, modelId, name) => {
+            const node = nodes.get(modelId);
+            if (node) node.data.name = name;
+            log(`[假后端] renameNode ${modelId} → ${name}`);
+          },
+          updateModelProperty: async dto => {
+            const rows = properties.get(dto.instanceId) ?? [];
+            const row = rows.find(item => item.key === dto.key);
+            if (row) row.value = String(dto.value);
+            log(`[假后端] updateModelProperty ${dto.instanceId}.${dto.key} = ${dto.value}`);
+          },
+          getModelProperties: async (projectId, modelId) => properties.get(modelId) ?? [{ key: "NamedElement-name", name: "名称", value: "车辆系统", dataType: "String", readonly: false }],
+          removeModel: async (projectId, modelIds) => {
+            modelIds.forEach(id => nodes.delete(id));
+            log(`[假后端] removeModel ${modelIds.join(",")}`);
+          }
+        },
+        shapeService: {
+          getDiagramAllShape: async () => shapes,
+          siderBarItemDropValidate: async () => [{ name: "创建", key: "create", priority: 1 }],
+          siderBarItemDrop: async data => {
+            const shapeId = `shape-${shapes.length + 1}`;
+            const modelId = `created-${++createdSeq}`;
+            addNode(modelId, "pkg-1", "新图形元素", "Block");
+            shapes.push({ id: shapeId, name: "新图形", shapeType: "Symbol", shapeKey: data.sourceType, modelId, bounds: { x: data.point.x, y: data.point.y, width: 140, height: 90 } });
+            log(`[假后端] siderBarItemDrop ${data.sourceType} → shape ${shapeId}`);
+            return { shapeId, modelId };
+          },
+          treeDropShape: async data => {
+            const shapeId = `shape-${shapes.length + 1}`;
+            shapes.push({ id: shapeId, name: "摆上的图形", shapeType: "Symbol", shapeKey: "Block", modelId: data.modelId, bounds: { x: data.point.x, y: data.point.y, width: 140, height: 90 } });
+            log(`[假后端] treeDropShape model=${data.modelId} → shape ${shapeId}`);
+            return { code: 1000, data: true };
+          },
+          isValidConnectSource: async () => true,
+          isValidConnectTarget: async () => true,
+          connectShape: async () => ({ data: { createdShapes: [{ id: `edge-${shapes.length + 1}` }] } }),
+          removeShape: async (projectId, diagramId, shapeIds) => log(`[假后端] removeShape ${shapeIds.join(",")}`),
+          deleteShape: async (projectId, diagramId, shapeIds) => log(`[假后端] deleteShape ${shapeIds.join(",")}`),
+          moveShape: async (projectId, diagramId, shapeIds, dx, dy) => {
+            shapeIds.forEach(id => {
+              const shape = shapes.find(item => item.id === id);
+              if (shape) {
+                shape.bounds.x += dx;
+                shape.bounds.y += dy;
+              }
+            });
+            log(`[假后端] moveShape ${shapeIds.join(",")} dx=${dx} dy=${dy}`);
+            return [];
+          }
+        },
+        projectService: {
+          getDiagramConfigForView: async () => ({
+            siderbarConfig: [
+              {
+                id: "g1",
+                name: "常用组件",
+                children: [
+                  { showData: { name: "模块", siderBarkey: "Block" } },
+                  { showData: { name: "关联", siderBarkey: "Association" } }
+                ]
+              }
+            ]
+          })
+        },
+        storage: {
+          data: new Map(),
+          get(key) {
+            return this.data.get(key) ?? null;
+          },
+          set(key, value) {
+            this.data.set(key, value);
+          },
+          remove(key) {
+            this.data.delete(key);
+          }
+        },
+        modelTreeSelectWindow: {
+          popup: async () => ({ success: true, selectedId: ["pkg-1"], selectedName: ["车辆系统"] })
+        },
+        notify: options => log(`[宿主通知] ${options.type}: ${options.message}`)
+      };
+
+      /* ---------------- 假供应商（Node 代理 + SSE） ---------------- */
+      const jobs = new Map();
+
+      /*
+       * 每个假服务返回各自的模型清单：模型选择器要按服务分栏，
+       * 单一列表看不出机架筛选与"行内服务归属"的效果。
+       */
+      const MODELS_BY_HOST = {
+        "api.commandcode.ai": [
+          { id: "deepseek/deepseek-v4-flash", context_length: 1000000 },
+          { id: "deepseek/deepseek-v4", context_length: 1000000 },
+          { id: "glm/glm-5.3-flash", context_length: 128000 }
+        ],
+        "opencode.ai": [
+          { id: "gpt-6-luna", context_length: 400000 },
+          { id: "gpt-6.1-sol", context_length: 400000 },
+          { id: "deepseek-v4.1-flash", context_length: 1000000 },
+          { id: "glm-5.3-flash", context_length: 128000 }
+        ],
+        "vllm.local": [{ id: "Qwen2.5-14B-Instruct", context_length: 32768 }]
+      };
+      const modelsFor = url => {
+        try {
+          return MODELS_BY_HOST[new URL(url).host] ?? [];
+        } catch {
+          return [];
+        }
+      };
+
+      const sseChunk = delta =>
+        `data: ${JSON.stringify({ id: "preview", object: "chat.completion.chunk", created: 1, model: "preview-model", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`;
+
+      const buildReply = body => {
+        let question = "";
+        try {
+          const parsed = JSON.parse(body);
+          const system = (parsed.messages ?? []).filter(message => message.role === "system").map(message => message.content).join("\n");
+          if (system.includes("目前只规划")) return [JSON.stringify({ tasks: ["requirements", "semantics", "layout"].map(role => ({ role, task: "根据任务分析并提供工具证据与建议", required: true, dependsOn: [] })) })];
+          if (system.includes("你是模型检查专家")) return [JSON.stringify({ approved: true, summary: "【模拟检查】意见已汇总，真实模型需另行核实" })];
+          if (system.includes("你是建模负责人，统一交付")) return ["【模拟响应】已汇总需求、SysML 语义和图形布局建议。此处仅验证专家团交互，不代表真实模型已创建。"];
+          if (system.includes("只读分析，不生成提案")) return ["【模拟专家报告】建议复用当前容器，核实类型、多重度和关系，再完成图形布局。"];
+          const last = [...(parsed.messages ?? [])].reverse().find(message => message.role === "user");
+          question = typeof last?.content === "string" ? last.content : (last?.content ?? []).map(part => part.text ?? "").join(" ");
+        } catch {
+          question = "";
+        }
+        const tools = ["model_get_tree", "model_search", "model_get_element", "model_get_properties", "diagram_list", "diagram_read_shapes", "diagram_read_palette"];
+        const reply = question.includes("审查")
+          ? `\n\n【模拟响应】这轮没有工具调用；真实运行时会先读模型再作答。可用工具：${tools.join("、")}。`
+          : `\n\n【模拟响应】收到：${question || "(空)"}。本页不请求真实供应商：真实运行时模型会先调用 ${tools.slice(0, 3).join("、")} 等工具读取模型，再给出结论或生成提案卡片。`;
+        return reply.match(/[\s\S]{1,24}/g) ?? [];
+      };
+
+      const mockAxios = {
+        defaults: { baseURL: "http://preview.local" },
+        post: async (url, body) => {
+          if (url.endsWith("/models")) {
+            return { data: { code: 1000, data: { requestId: body.requestId, status: 200, statusText: "OK", headers: { "content-type": "application/json" } } } };
+          }
+          if (url.endsWith("/chat/completions")) {
+            if (String(body.method).toUpperCase() === "GET") {
+              return { data: { code: 1000, data: { requestId: body.requestId, status: 200, statusText: "OK", headers: { "content-type": "application/json" } } } };
+            }
+            jobs.set(body.requestId, { chunks: buildReply(body.body).map(text => sseChunk({ content: text })), done: false });
+            return { data: { code: 1000, data: { requestId: body.requestId, status: 200, statusText: "OK", headers: { "content-type": "text/event-stream" } } } };
+          }
+          if (url.endsWith("/begin")) {
+            const requestId = body.requestId;
+            const isModels = body.url.endsWith("/models");
+            if (isModels) {
+              jobs.set(requestId, { chunks: [JSON.stringify({ data: modelsFor(body.url) })], done: true });
+            } else {
+              jobs.set(requestId, { chunks: buildReply(body.body).map(text => sseChunk({ content: text })), done: false });
+            }
+            log(`[假代理] begin ${body.method ?? "POST"} ${body.url}`);
+            return { data: { code: 1000, data: { requestId, status: 200, statusText: "OK", headers: { "content-type": isModels ? "application/json" : "text/event-stream" } } } };
+          }
+          if (url.endsWith("/abort")) {
+            jobs.delete(body.requestId);
+            log(`[假代理] abort ${body.requestId}`);
+            return { data: { code: 1000, data: true } };
+          }
+          return { data: { code: 1000, data: true } };
+        },
+        get: async (url, config) => {
+          if (url.endsWith("/poll")) {
+            if (new URLSearchParams(location.search).has("slow") && !window.__fastMock) await new Promise(resolve => setTimeout(resolve, 3000));
+            const requestId = config?.params?.requestId;
+            const job = jobs.get(requestId);
+            if (!job) return { data: { code: 1000, data: { chunks: [], done: true, error: "请求已结束" } } };
+            const chunks = job.chunks.splice(0);
+            if (!job.done && !chunks.length) {
+              job.done = true;
+              if (!window.__fastMock) chunks.push(sseChunk({ content: "（模拟回复结束）" }));
+              chunks.push(`data: ${JSON.stringify({ id: "preview", object: "chat.completion.chunk", created: 1, model: "preview-model", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`, "data: [DONE]\n\n");
+            }
+            return { data: { code: 1000, data: { chunks, done: job.done } } };
+          }
+          return { data: { code: 1000, data: {} } };
+        }
+      };
+
+      /* ---------------- 宿主全局对象 ---------------- */
+      let activeRightTab = "aiAssistant";
+      const panelActive = Vue.ref(true);
+      const renderDock = () => {
+        panelActive.value = activeRightTab === "aiAssistant";
+        document.querySelectorAll(".dock-tab").forEach(tab => tab.classList.toggle("active", tab.dataset.value === activeRightTab));
+        document.querySelector("#panel-host").style.display = activeRightTab === "aiAssistant" ? "" : "none";
+        document.querySelector("#dock").style.width = activeRightTab === "aiAssistant" ? "628px" : "48px";
+      };
+      const global = {
+        user: { id: "preview-user" },
+        insertConnectPosition: "notInsert",
+        get activeRightTab() {
+          return activeRightTab;
+        },
+        setActiveRightTab(value) {
+          activeRightTab = value;
+          renderDock();
+        }
+      };
+
+      window.app = {
+        activeProject: project,
+        projectManager: { getProject: () => project },
+        licenseState: { hasSysMLPermission: () => true },
+        global
+      };
+      window.api = {
+        vue: Vue,
+        Action: class {},
+        HeaderMenuType: { Tool: "tool" },
+        modelHttp: { axios: mockAxios, get: mockAxios.get, post: mockAxios.post },
+        axios: mockAxios,
+        isElectron: new URLSearchParams(location.search).has("desktop") && typeof window.require === "function",
+        notify: services.notify,
+        storage: services.storage,
+        modelService: services.modelService,
+        shapeService: services.shapeService,
+        projectService: services.projectService,
+        modelTreeSelectWindow: services.modelTreeSelectWindow
+      };
+      const { installCommonWindowHost } = await import("./common-window-host.js");
+      installCommonWindowHost(Vue);
+
+      document.querySelector("#switch").addEventListener("click", () => {
+        global.setActiveRightTab(activeRightTab === "aiAssistant" ? undefined : "aiAssistant");
+      });
+      document.querySelectorAll(".dock-tab").forEach(tab =>
+        tab.addEventListener("click", () => {
+          global.setActiveRightTab(tab.dataset.value === activeRightTab ? undefined : tab.dataset.value);
+        })
+      );
+
+      /* ---------------- 渲染面板 ---------------- */
+
+      /*
+       * 预置三个假服务与两条收藏：模型选择器按服务分栏、收藏页与 Ctrl+1–9
+       * 都依赖多服务数据才能看出来；数据共享确认也一并预置，省去每条消息的弹窗。
+       */
+      services.storage.set("aiProvider", {
+        activeProfileId: "pv-command",
+        dataSharingConfirmedProfileIds: ["pv-command", "pv-opencode", "pv-vllm"],
+        favoriteModels: ["pv-command::deepseek/deepseek-v4-flash", "pv-opencode::gpt-6-luna"],
+        permissionMode: "proposal",
+        profiles: [
+          { id: "pv-command", name: "Command Code", baseURL: "https://api.commandcode.ai/provider/v1", model: "deepseek/deepseek-v4-flash" },
+          { id: "pv-opencode", name: "OpenCode Go", baseURL: "https://opencode.ai/zen/go/v1", model: "deepseek-v4.1-flash", extraHeaders: "x-opencode-session: preview-session" },
+          { id: "pv-vllm", name: "内网 vLLM", baseURL: "https://vllm.local/v1", model: "Qwen2.5-14B-Instruct" }
+        ]
+      });
+
+      const detachedId = new URLSearchParams(location.search).get("assistantWindow");
+      // 独立窗口只展示全屏通用窗口，避免背后的预览工作区产生外层滚动条。
+      if (detachedId) document.body.style.overflow = "hidden";
+      const panelModule = detachedId
+        ? await import("/src/components/modals/assistantWindow/index.vue")
+        : await import("/src/components/panels/aiAssistant/index.vue");
+      Vue.createApp({
+        render: () => detachedId ? Vue.h(panelModule.default, { sessionId: detachedId }) : Vue.h(Vue.KeepAlive, null, { default: () => panelActive.value ? Vue.h(panelModule.default) : null })
+      }).mount("#panel-host");
+      renderDock();
+      log("[预览] 面板已挂载：已预置 3 个假服务与 2 条收藏，可查看模型选择器、收藏与 Ctrl+1/2 切换。");
+    </script>
+  </body>
+</html>

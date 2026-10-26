@@ -1,0 +1,67 @@
+/*
+ * AI 面板设计令牌与图标工具。
+ *
+ * 宿主主题只定义了 --md-primary-color 等少数变量；面板用到的
+ * --md-text-* / --md-neutral-* / --md-radius-* 在宿主里并不存在，
+ * 这张表把它们正式定下来（此前全靠各处的 fallback 值兜底），
+ * 统一墨色、线与面、圆角后，聊天区与设置区共享同一套视觉基线。
+ * 令牌声明在 .ai-panel 根节点上，只影响面板内部，不波及宿主其它界面。
+ */
+
+@mixin ai-tokens {
+  /* 文字：四级墨色 */
+  --md-text-primary: #202124;
+  --md-text-regular: #414448;
+  --md-text-secondary: #62666b;
+  --md-text-placeholder: #70747a;
+
+  /* 面与线 */
+  --md-neutral-50: #f7f7f8;
+  --md-neutral-100: #f0f0f2;
+  --md-neutral-200: #e4e5e7;
+  --md-neutral-300: #d1d3d6;
+  --md-border-color: #e4e5e7;
+
+  /* 圆角 */
+  --md-radius-sm: 4px;
+  --md-radius-md: 8px;
+  --md-radius-lg: 12px;
+
+  /* 插件内使用中性强调色，避免改变宿主主题。 */
+  --ai-accent: #202124;
+  --ai-accent-strong: #17181a;
+  --ai-accent-soft: #f0f0f2;
+  --ai-accent-line: #d1d3d6;
+
+  /* 语义色：比 Element 默认收一档，与墨色系更协调 */
+  --ai-ok: #2f9c6d;
+  --ai-warn: #c9862d;
+  --ai-danger: #cf4a42;
+
+  /* 字体、阴影与焦点环 */
+  --ai-font: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --ai-mono: Consolas, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  --ai-shadow-pop: 0 8px 24px rgba(23, 30, 42, 0.1), 0 2px 6px rgba(23, 30, 42, 0.04);
+  --ai-shadow-dialog: 0 24px 64px rgba(23, 30, 42, 0.2), 0 4px 12px rgba(23, 30, 42, 0.06);
+  --ai-ring: 0 0 0 2px rgba(32, 33, 36, 0.14);
+}
+
+/* 图标尺寸与线宽：Lucide 按 24 视框、线宽 2 设计，显示尺寸越小视觉线越粗，需按尺寸收线 */
+@mixin ai-icon($size: 14px, $stroke: 1.8) {
+  flex-shrink: 0;
+  width: $size;
+  height: $size;
+
+  :deep(path),
+  :deep(circle),
+  :deep(rect),
+  :deep(line),
+  :deep(polyline) {
+    stroke-width: $stroke;
+  }
+}
+
+/* 等宽数字：时长、token 数等机械元数据对齐用 */
+@mixin ai-tabular {
+  font-variant-numeric: tabular-nums;
+}

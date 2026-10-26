@@ -1,0 +1,15 @@
+/dist
+/build
+/src-bex/www
+/src/libs/mdesign
+devTools
+/docs
+/src/property_table.json
+/src/pages/mxgraph/resources
+/src/pages/mxgraph/styles
+/src/pages/mxgraph/stencils
+/src/util/regedit
+/src/lib
+/projects
+/localStorage
+/node_modules
